@@ -5,10 +5,29 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const API_URL = process.env.API_URL;
-const API_KEY = process.env.API_KEY;
-const SALON_ID = process.env.SALON_ID; // Optionnel : ID d'un salon Discord pour les messages
+// Nettoie les espaces ou guillemets éventuels et accepte plusieurs noms possibles
+function lireEnv(noms) {
+  for (const nom of noms) {
+    const val = process.env[nom];
+    if (typeof val === "string") {
+      const propre = val.trim().replace(/^["']|["']$/g, "");
+      if (propre.length > 0) {
+        return { valeur: propre, source: nom };
+      }
+    }
+  }
+  return { valeur: "", source: null };
+}
+
+const tokenInfo = lireEnv(["DISCORD_TOKEN", "TOKEN", "BOT_TOKEN"]);
+const apiUrlInfo = lireEnv(["API_URL"]);
+const apiKeyInfo = lireEnv(["API_KEY"]);
+const salonIdInfo = lireEnv(["SALON_ID"]);
+
+const DISCORD_TOKEN = tokenInfo.valeur;
+const API_URL = apiUrlInfo.valeur;
+const API_KEY = apiKeyInfo.valeur;
+const SALON_ID = salonIdInfo.valeur;
 
 async function envoyerMessageSalon(texte) {
   if (!SALON_ID) return;
@@ -50,9 +69,7 @@ async function relancerServeur() {
   }
 }
 
-client.once("ready", () => {
-  console.log(`Bot connecté en tant que ${client.user.tag}`);
-
+function demarrerCycle() {
   // 4 heures en millisecondes : 4h * 60m * 60s * 1000ms = 14 400 000 ms
   const QUATRE_HEURES = 4 * 60 * 60 * 1000;
 
@@ -60,11 +77,38 @@ client.once("ready", () => {
     console.log("Déclenchement du cycle de 4 heures...");
     relancerServeur();
   }, QUATRE_HEURES);
+}
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection :", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception :", err);
+});
+
+client.once("clientReady", () => {
+  console.log(`Bot connecté en tant que ${client.user.tag} (via ${tokenInfo.source})`);
+  demarrerCycle();
+});
+
+// Fallback si une version plus ancienne de discord.js émet "ready"
+client.once("ready", () => {
+  if (!client.user) return;
+  console.log(`Bot connecté en tant que ${client.user.tag} (via ${tokenInfo.source})`);
+  demarrerCycle();
 });
 
 if (!DISCORD_TOKEN) {
-  console.error("ERREUR : La variable DISCORD_TOKEN est introuvable.");
-  process.exit(1);
+  console.error("ALERTE : Aucun token trouvé (DISCORD_TOKEN / TOKEN / BOT_TOKEN).");
+  console.log("Noms des variables d'environnement détectées :", Object.keys(process.env));
+  // On garde le processus actif 10 min pour lire les logs sans crash immédiat
+  setInterval(() => {
+    console.log("En attente d'une variable de token valide sur Railway...");
+  }, 60 * 1000);
+} else {
+  console.log(`Token détecté via "${tokenInfo.source}" (longueur : ${DISCORD_TOKEN.length}). Connexion...`);
+  client.login(DISCORD_TOKEN).catch((err) => {
+    console.error("Échec de client.login :", err.message);
+  });
 }
-
-client.login(DISCORD_TOKEN);
