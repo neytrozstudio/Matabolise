@@ -16,15 +16,16 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const API_URL = process.env.API_URL;
-const API_KEY = process.env.API_KEY;
-const SALON_ID = process.env.SALON_ID;
-const OWNER_ID = process.env.OWNER_ID;
-const SERVER_SOFTWARE = process.env.SERVER_SOFTWARE || "Paper";
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.trim() : "";
+const API_URL = process.env.API_URL ? process.env.API_URL.trim() : "";
+const API_KEY = process.env.API_KEY ? process.env.API_KEY.trim() : "";
+const SALON_ID = process.env.SALON_ID ? process.env.SALON_ID.trim() : "";
+const GUILD_ID = process.env.GUILD_ID ? process.env.GUILD_ID.trim() : "";
+const SERVER_SOFTWARE = process.env.SERVER_SOFTWARE ? process.env.SERVER_SOFTWARE.trim() : "Paper";
 const SERVEUR_SORTI = false; // Passe à true quand le serveur sera sorti
 
 let panelMessage = null;
+let demarrageFait = false;
 
 async function envoyerMessageSalon(texte) {
   if (!SALON_ID) return;
@@ -120,7 +121,10 @@ async function afficherPanel(salon) {
   }
 }
 
-client.once("ready", async () => {
+async function auDemarrage() {
+  if (demarrageFait) return;
+  demarrageFait = true;
+
   console.log(`Bot connecté en tant que ${client.user.tag}`);
 
   const commandes = [
@@ -128,7 +132,18 @@ client.once("ready", async () => {
   ];
 
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
-  await rest.put(Routes.applicationCommands(client.user.id), { body: commandes });
+
+  try {
+    if (GUILD_ID) {
+      await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commandes });
+      console.log(`Commande /panel enregistrée sur le serveur ${GUILD_ID}.`);
+    } else {
+      await rest.put(Routes.applicationCommands(client.user.id), { body: commandes });
+      console.log("Commande /panel enregistrée globalement.");
+    }
+  } catch (err) {
+    console.error("Erreur enregistrement commande /panel :", err.message);
+  }
 
   await afficherPanel();
 
@@ -142,32 +157,30 @@ client.once("ready", async () => {
     const msg = await envoyerAction("restart");
     await envoyerMessageSalon(msg);
   }, QUATRE_HEURES);
-});
+}
+
+client.once("clientReady", auDemarrage);
+client.once("ready", auDemarrage);
 
 client.on("interactionCreate", async (interaction) => {
-  if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
-    if (OWNER_ID && interaction.user.id !== OWNER_ID) {
-      await interaction.reply({ content: "Accès refusé.", flags: MessageFlags.Ephemeral });
-      return;
-    }
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    await afficherPanel(interaction.channel);
-    await interaction.editReply("Panel envoyé.");
-    return;
-  }
-
-  if (interaction.isButton()) {
-    if (!["start", "stop", "restart"].includes(interaction.customId)) return;
-
-    if (OWNER_ID && interaction.user.id !== OWNER_ID) {
-      await interaction.reply({ content: "Tu n'as pas accès à ces boutons.", flags: MessageFlags.Ephemeral });
+  try {
+    if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await afficherPanel(interaction.channel);
+      await interaction.editReply("Panel envoyé.");
       return;
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const resultat = await envoyerAction(interaction.customId);
-    await interaction.editReply(resultat);
-    setTimeout(() => afficherPanel(), 2000);
+    if (interaction.isButton()) {
+      if (!["start", "stop", "restart"].includes(interaction.customId)) return;
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const resultat = await envoyerAction(interaction.customId);
+      await interaction.editReply(resultat);
+      setTimeout(() => afficherPanel(), 2000);
+    }
+  } catch (err) {
+    console.error("Erreur interactionCreate :", err);
   }
 });
 
